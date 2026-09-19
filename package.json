@@ -1,0 +1,20 @@
+{
+  "name": "bharat-airfare-index-backend",
+  "version": "1.0.0",
+  "description": "Fetches real fares from FlightAPI.io on a schedule, stores history, serves a small JSON API for the Bharat Airfare Index website.",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-cron": "^3.0.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
