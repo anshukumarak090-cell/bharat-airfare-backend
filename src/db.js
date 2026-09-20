@@ -1,56 +1,55 @@
-import Database from 'better-sqlite3';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const db = new Database(path.join(__dirname, '..', 'fares.db'));
+const DB_PATH = path.join(__dirname, '..', 'fares.json');
 
-db.pragma('journal_mode = WAL');
+/** Shape: { [routeId]: [ { origin, destination, airline, price, currency, fetched_at }, ... ] } */
+function loadAll() {
+  try {
+    const raw = fs.readFileSync(DB_PATH, 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS fare_snapshots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    route_id TEXT NOT NULL,
-    origin TEXT NOT NULL,
-    destination TEXT NOT NULL,
-    airline TEXT,
-    price REAL NOT NULL,
-    currency TEXT NOT NULL DEFAULT 'INR',
-    fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-  CREATE INDEX IF NOT EXISTS idx_route_time ON fare_snapshots(route_id, fetched_at);
-`);
+function saveAll(data) {
+  fs.writeFileSync(DB_PATH, JSON.stringify(data), 'utf-8');
+}
 
 export function insertSnapshot({ routeId, origin, destination, airline, price, currency }) {
-  db.prepare(`
-    INSERT INTO fare_snapshots (route_id, origin, destination, airline, price, currency)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(routeId, origin, destination, airline || null, price, currency || 'INR');
+  const data = loadAll();
+  if (!data[routeId]) data[routeId] = [];
+  data[routeId].push({
+    origin, destination,
+    airline: airline || null,
+    price, currency: currency || 'INR',
+    fetched_at: new Date().toISOString(),
+  });
+  saveAll(data);
 }
 
 export function latestForRoute(routeId) {
-  return db.prepare(`
-    SELECT * FROM fare_snapshots WHERE route_id = ? ORDER BY fetched_at DESC LIMIT 1
-  `).get(routeId);
+  const data = loadAll();
+  const rows = data[routeId] || [];
+  return rows.length ? rows[rows.length - 1] : null;
 }
 
 export function latestForAllRoutes() {
-  return db.prepare(`
-    SELECT f.* FROM fare_snapshots f
-    INNER JOIN (
-      SELECT route_id, MAX(fetched_at) AS max_time
-      FROM fare_snapshots GROUP BY route_id
-    ) latest ON f.route_id = latest.route_id AND f.fetched_at = latest.max_time
-    ORDER BY f.route_id
-  `).all();
+  const data = loadAll();
+  return Object.keys(data)
+    .filter(routeId => data[routeId].length)
+    .map(routeId => ({ route_id: routeId, ...data[routeId][data[routeId].length - 1] }))
+    .sort((a, b) => a.route_id.localeCompare(b.route_id));
 }
 
 export function historyForRoute(routeId, days = 30) {
-  return db.prepare(`
-    SELECT price, currency, fetched_at FROM fare_snapshots
-    WHERE route_id = ? AND fetched_at >= datetime('now', ?)
-    ORDER BY fetched_at ASC
-  `).all(routeId, `-${days} days`);
+  const data = loadAll();
+  const rows = data[routeId] || [];
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  return rows
+    .filter(r => new Date(r.fetched_at).getTime() >= cutoff)
+    .map(r => ({ price: r.price, currency: r.currency, fetched_at: r.fetched_at }));
 }
-
-export default db;
